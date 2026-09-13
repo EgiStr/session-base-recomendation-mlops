@@ -5,24 +5,33 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ProductCard from "../components/ProductCard";
+import ProductCard, { type Product } from "../components/ProductCard";
 import TabBar from "../components/TabBar";
-import { getSession, postEvent, type RecoItem } from "../lib/api";
+import {
+  getCatalog,
+  getSession,
+  postEvent,
+  type RecoItem,
+} from "../lib/api";
 
 const SID_KEY = "tripranker:sid";
-const CATALOG = [
-  "187946",
-  "461686",
-  "5411",
-  "213834",
-  "321422",
-  "456881",
-  "123456",
-  "789012",
-  "345678",
-  "901234",
-  "112233",
-  "445566",
+
+/**
+ * Verified-real item IDs used only when GET /v1/catalog is unavailable.
+ * First 5 = postgres top-5 by views (real popularity ranks 1–5, honest
+ * "populer #rank" labels). Rest = pre-existing real-looking catalog IDs
+ * (rank unknown → no rank label, never invented).
+ * RetailRocket carries no titles/prices — labels stay as "Produk {id}".
+ */
+const VERIFIED_REAL: Product[] = [
+  { item_id: "187946", popularityRank: 1 },
+  { item_id: "461686", popularityRank: 2 },
+  { item_id: "5411", popularityRank: 3 },
+  { item_id: "370653", popularityRank: 4 },
+  { item_id: "219512", popularityRank: 5 },
+  { item_id: "213834" },
+  { item_id: "321422" },
+  { item_id: "456881" },
 ];
 
 function getSid(): string {
@@ -38,6 +47,8 @@ export default function ShopPage() {
   const [sid, setSid] = useState("");
   const [recos, setRecos] = useState<RecoItem[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<Product[]>(VERIFIED_REAL);
+  const [catalogLive, setCatalogLive] = useState(false);
   const [meta, setMeta] = useState({ version: "—", ms: 0, req: "—" });
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -58,6 +69,25 @@ export default function ShopPage() {
     const id = getSid();
     setSid(id);
     void refresh(id);
+    // Live catalog; falls back to VERIFIED_REAL when /v1/catalog 404s.
+    (async () => {
+      try {
+        const c = await getCatalog(12);
+        setCatalog(
+          c.items.map((it) => ({
+            item_id: it.item_id,
+            ...(typeof it.rank === "number"
+              ? { popularityRank: it.rank }
+              : {}),
+            ...(typeof it.views === "number" ? { views: it.views } : {}),
+          }))
+        );
+        setCatalogLive(true);
+      } catch {
+        setCatalog(VERIFIED_REAL);
+        setCatalogLive(false);
+      }
+    })();
   }, [refresh]);
 
   const fire = useCallback(
@@ -128,6 +158,7 @@ export default function ShopPage() {
                   product={{ item_id: r.item_id, score: r.score, rank: i + 1 }}
                   onClick={() => void fire(r.item_id, "click")}
                   onCart={() => void fire(r.item_id, "cart")}
+                  onOrder={() => void fire(r.item_id, "order")}
                   pending={pending !== null}
                 />
               </li>
@@ -137,16 +168,22 @@ export default function ShopPage() {
       </section>
 
       <section aria-label="Katalog" className="mt-6">
-        <h2 className="mb-2 font-display text-md font-bold text-neutral-900">
-          Katalog populer
-        </h2>
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="font-display text-md font-bold text-neutral-900">
+            Katalog populer
+          </h2>
+          <span className="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-semibold text-primary-700">
+            {catalogLive ? "live" : "populer"}
+          </span>
+        </div>
         <div className="grid grid-cols-2 gap-2.5">
-          {CATALOG.map((id) => (
+          {catalog.map((p) => (
             <ProductCard
-              key={id}
-              product={{ item_id: id }}
-              onClick={() => void fire(id, "click")}
-              onCart={() => void fire(id, "cart")}
+              key={p.item_id}
+              product={p}
+              onClick={() => void fire(p.item_id, "click")}
+              onCart={() => void fire(p.item_id, "cart")}
+              onOrder={() => void fire(p.item_id, "order")}
               pending={pending !== null}
             />
           ))}

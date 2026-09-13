@@ -8,6 +8,7 @@ export type Product = {
   score?: number;
   rank?: number;
   views?: number;
+  popularityRank?: number;
 };
 
 const HUES = [252, 38, 145, 245, 85];
@@ -22,11 +23,13 @@ export default function ProductCard({
   product,
   onClick,
   onCart,
+  onOrder,
   pending,
 }: {
   product: Product;
   onClick: () => void;
   onCart: () => void;
+  onOrder?: () => void;
   pending?: boolean;
 }) {
   const hue = hueFor(product.item_id);
@@ -64,20 +67,37 @@ export default function ProductCard({
               {typeof product.rank === "number" && ` · #${product.rank}`}
             </p>
           )}
+          {typeof product.popularityRank === "number" && (
+            <p className="text-xs text-neutral-500">
+              populer #{product.popularityRank}
+            </p>
+          )}
           {typeof product.views === "number" && (
             <p className="text-xs text-neutral-500">
               {product.views.toLocaleString("id-ID")}× dilihat
             </p>
           )}
         </div>
-        <button
-          onClick={onCart}
-          disabled={pending}
-          aria-label={`Tambah produk ${product.item_id} ke keranjang`}
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-brand bg-accent-500 px-3 text-sm font-semibold text-white transition-colors hover:bg-accent-600 focus-visible:outline-2 disabled:opacity-50"
-        >
-          {pending ? "…" : "+ Keranjang"}
-        </button>
+        <div className="flex shrink-0 flex-col gap-1.5">
+          <button
+            onClick={onCart}
+            disabled={pending}
+            aria-label={`Tambah produk ${product.item_id} ke keranjang`}
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-brand bg-accent-500 px-3 text-sm font-semibold text-white transition-colors hover:bg-accent-600 focus-visible:outline-2 disabled:opacity-50"
+          >
+            {pending ? "…" : "+ Keranjang"}
+          </button>
+          {onOrder && (
+            <button
+              onClick={onOrder}
+              disabled={pending}
+              aria-label={`Beli produk ${product.item_id}`}
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-brand border border-accent-600 px-3 text-sm font-semibold text-accent-600 transition-colors hover:bg-accent-500 hover:text-white focus-visible:outline-2 disabled:opacity-50"
+            >
+              {pending ? "…" : "Beli"}
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );

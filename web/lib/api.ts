@@ -63,6 +63,56 @@ export async function getHealth(): Promise<{ status: string; ready: boolean }> {
 }
 
 export async function getP95(): Promise<{ p95_ms: number; samples: number }> {
-  const r = await fetch(`${API_BASE}/metrics`).then((r) => r.json());
-  return r as { p95_ms: number; samples: number };
+  // JSON endpoint first; the raw Prometheus text lives at /metrics.
+  try {
+    const r = await fetch(`${API_BASE}/metrics/json`);
+    if (!r.ok) throw new Error(`metrics/json ${r.status}`);
+    return (await r.json()) as { p95_ms: number; samples: number };
+  } catch {
+    const r = await fetch(`${API_BASE}/metrics`);
+    if (!r.ok) throw new Error(`metrics ${r.status}`);
+    return (await r.json()) as { p95_ms: number; samples: number };
+  }
+}
+
+export type CatalogItem = { item_id: string; rank?: number; views?: number };
+export type CatalogOut = { items: CatalogItem[] };
+
+/** Thrown when GET /v1/catalog is unavailable (e.g. endpoint not yet added). */
+export class CatalogUnavailableError extends Error {
+  constructor(message = "catalog unavailable") {
+    super(message);
+    this.name = "CatalogUnavailableError";
+  }
+}
+
+/**
+ * Live catalog from the API: GET /v1/catalog?n=12 → {"items":[{"item_id","rank"}]}.
+ * Throws CatalogUnavailableError when the endpoint is missing/failing so the
+ * page can fall back to the verified-real ID list.
+ */
+export async function getCatalog(n = 12): Promise<CatalogOut> {
+  let r: Response;
+  try {
+    r = await fetch(`${API_BASE}/v1/catalog?n=${n}`);
+  } catch (e) {
+    throw new CatalogUnavailableError(
+      e instanceof Error ? e.message : "catalog fetch failed"
+    );
+  }
+  if (!r.ok) throw new CatalogUnavailableError(`catalog ${r.status}`);
+  const raw = (await r.json()) as {
+    items?: Array<{ item_id?: string | number; rank?: number; views?: number }>;
+  };
+  const items: CatalogItem[] = Array.isArray(raw.items)
+    ? raw.items
+        .filter((it) => it && it.item_id !== undefined && it.item_id !== null)
+        .map((it) => ({
+          item_id: String(it.item_id),
+          ...(typeof it.rank === "number" ? { rank: it.rank } : {}),
+          ...(typeof it.views === "number" ? { views: it.views } : {}),
+        }))
+    : [];
+  if (items.length === 0) throw new CatalogUnavailableError("catalog empty");
+  return { items };
 }

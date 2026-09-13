@@ -1,0 +1,65 @@
+{
+  "uid": "triprank",
+  "title": "TripRank",
+  "description": "TripRanker model operations: request rate, latency percentiles, and error rate from triprank_* Prometheus metrics.",
+  "tags": ["triprank", "mlops"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests / sec",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(triprank_requests_total[1m])",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "P95 latency",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, rate(triprank_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(triprank_errors_total[5m])",
+          "legendFormat": "errors/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "P95 latency by model_version",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (model_version, le) (rate(triprank_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{model_version}}"
+        }
+      ]
+    }
+  ]
+}
