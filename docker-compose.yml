@@ -104,11 +104,12 @@ services:
     ports:
       - "3001:3001"
     environment:
-      # Local-dev mode: browser-side fetches hit host uvicorn directly.
-      # Flip back to http://api:8000 only when API runs as a compose service.
+      # Full-docker mode: browser-side fetches go through host port 8000,
+      # which is the `api` compose service. (Container-to-container the
+      # API is reachable at http://api:8000.)
       NEXT_PUBLIC_API_BASE: http://localhost:8000
-    # NOTE (local-dev): no depends_on api — the API runs on host uvicorn.
-    # Restore `depends_on: [api]` when the API is deployed as a compose service.
+    depends_on:
+      - api
 
 volumes:
   mlflow-data:
