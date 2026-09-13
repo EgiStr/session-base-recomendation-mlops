@@ -194,6 +194,9 @@ class RecoItem(BaseModel):
     carts: Optional[int] = None
     orders: Optional[int] = None
     conv_rate: Optional[float] = None
+    rank: Optional[int] = None
+    category_id: Optional[int] = None
+    category_size: Optional[int] = None
 
 
 class EventOut(BaseModel):
