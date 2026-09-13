@@ -200,9 +200,10 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             return body
 
         if sess is None:  # cold-start → popularity fallback
-            if not inv:
+            pop = _popular(req.k)
+            if not pop:
                 return done([], "baseline-popularity", reason="no_candidates")
-            return done([{"item_id": i, "score": 0.5} for i in inv[:req.k]],
+            return done([{"item_id": i, "score": 0.5} for i in pop],
                         "baseline-popularity")
         if not state["model_ok"]:
             items, version = score_candidates(key, inv[:req.k], None, k=req.k)
@@ -257,7 +258,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             return done(items[:ev.k], version, st["recent_items"][-20:])
         except Exception as exc:  # never 5xx — fallback baseline
             log.error("events ingest failed: %s", exc)
-            fb = [{"item_id": i, "score": 0.5} for i in inv[:ev.k]]
+            fb = [{"item_id": i, "score": 0.5} for i in _popular(ev.k)]
             return done(fb, "fallback", [], reason="fallback")
 
     @app.get("/v1/session/{session_id}", response_model=SessionOut)
@@ -280,7 +281,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             st = _get_state(store, key)
             k = max(1, min(k, 100))
             if not st["recent_items"]:
-                fb = [{"item_id": i, "score": 0.5} for i in inv[:k]]
+                fb = [{"item_id": i, "score": 0.5} for i in _popular(k)]
                 return done(fb, "baseline-popularity", [], reason="cold_start")
             eff = ranker if state["model_ok"] else None
             cands = inv
@@ -293,7 +294,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                         last_event=st.get("last_event"))
         except Exception as exc:
             log.error("session fetch failed: %s", exc)
-            fb = [{"item_id": i, "score": 0.5} for i in inv[:k]]
+            fb = [{"item_id": i, "score": 0.5} for i in _popular(k)]
             return done(fb, "fallback", [], reason="fallback")
 
     @app.get("/health")
