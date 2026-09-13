@@ -51,3 +51,103 @@ def test_degraded_parity_and_cold_session():
     c2 = _client(model_ok=False)
     r2 = c2.post("/v1/events", json={"session_id": "S9", "item_id": "1"})
     assert r2.status_code == 200 and r2.json()["model_version"] == "fallback"
+
+
+def test_stats_absent_without_postgres():
+    # Given no DATABASE_URL / When cold recommend / Then 200, items carry no stats keys
+    c = _client()
+    r = c.get("/v1/session/STATLESS")
+    assert r.status_code == 200
+    for it in r.json()["items"]:
+        assert "views" not in it and "conv_rate" not in it
+
+
+def test_catalog_shape_and_never_5xx():
+    # Given mock ranker / When GET /v1/catalog / Then ranks 1..n, never 5xx
+    c = _client()
+    r = c.get("/v1/catalog?n=5")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert [it["rank"] for it in items] == [1, 2, 3, 4, 5]
+    assert all(it["item_id"] for it in items)
+
+
+def test_events_sink_never_blocks(monkeypatch):
+    # Given sink raising / When POST event / Then still 200 (best-effort)
+    import api.main as m
+
+    def boom(*a, **k):
+        raise RuntimeError("pg down")
+    monkeypatch.setattr(m, "sink_app_event", boom)
+    c = _client()
+    r = c.post("/v1/events", json={"session_id": "SINK1", "item_id": "1"})
+    assert r.status_code == 200 and r.json()["recent_items"] == ["1"]
+
+
+def test_monitor_shape_and_never_5xx():
+    # Given mock ranker / When GET /v1/monitor / Then 200 + serving block always
+    c = _client()
+    r = c.get("/v1/monitor")
+    assert r.status_code == 200
+    body = r.json()
+    assert "serving" in body and "samples" in body["serving"]
+    assert body["model_version"] == "ranker-test"
+
+
+def test_monitor_live_traffic_with_db():
+    # Given local DATABASE_URL + sunk event / When GET /v1/monitor / Then traffic counts it
+    import os
+
+    import psycopg
+
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        import pytest
+        pytest.skip("needs local DATABASE_URL")
+    try:
+        psycopg.connect(dsn, connect_timeout=3).close()
+    except Exception:
+        import pytest
+        pytest.skip("postgres unreachable")
+    c = _client()
+    eid = "e-mon-live-1"
+    c.post("/v1/events", json={"session_id": "MONDB", "event_id": eid,
+                               "item_id": "187946", "event_type": "click"})
+    try:
+        body = c.get("/v1/monitor").json()
+        assert body["traffic"] is not None
+        assert body["traffic"]["events"] >= 1
+        assert body["traffic"]["sessions"] >= 1
+        assert 0.0 <= (body["traffic"]["top100_overlap"] or 0.0) <= 1.0
+    finally:
+        with psycopg.connect(dsn, connect_timeout=3) as conn:
+            conn.execute("DELETE FROM events_app WHERE event_id=%s", (eid,))
+            conn.commit()
+
+
+def test_events_sink_persists_real_row():    # Given local DATABASE_URL / When POST event / Then row in events_app
+    import os
+
+    import psycopg
+
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        import pytest
+        pytest.skip("needs local DATABASE_URL")
+    try:
+        psycopg.connect(dsn, connect_timeout=3).close()
+    except Exception:
+        import pytest
+        pytest.skip("postgres unreachable")
+    c = _client()
+    eid = "e-sink-real-1"
+    c.post("/v1/events", json={"session_id": "SINKDB", "event_id": eid,
+                               "item_id": "187946", "event_type": "cart"})
+    with psycopg.connect(dsn, connect_timeout=3) as conn:
+        row = conn.execute(
+            "SELECT session_id, itemid, event FROM events_app WHERE event_id=%s",
+            (eid,)).fetchone()
+    assert row == ("SINKDB", 187946, "cart")
+    with psycopg.connect(dsn, connect_timeout=3) as conn:
+        conn.execute("DELETE FROM events_app WHERE event_id=%s", (eid,))
+        conn.commit()
