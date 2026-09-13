@@ -9,10 +9,12 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATABASE_URL: postgresql://triprank:triprank@postgres:5432/triprank
     depends_on:
       - redis
       - kafka
       - mlflow
+      - postgres
 
   mlflow:
     image: python:3.12-slim
@@ -47,6 +49,21 @@ services:
     ports:
       - "6379:6379"
 
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: triprank
+      POSTGRES_USER: triprank
+      POSTGRES_PASSWORD: triprank
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U triprank"]
+      interval: 5s
+      retries: 10
+
   prometheus:
     image: prom/prometheus:v3.0.0
     ports:
@@ -63,3 +80,4 @@ services:
 
 volumes:
   mlflow-data:
+  pgdata:
