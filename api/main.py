@@ -32,6 +32,37 @@ P95_WINDOW = 1000
 # (tests, dev without postgres). Real data only — no synthetic fill.
 _item_stats: Dict[str, Dict[str, float]] = {}
 _item_stats_loaded = False
+# Real RetailRocket taxonomy from sql/04_item_category (latest categoryid per
+# item + sibling counts). Same lazy/never-fatal contract; items without a
+# category simply carry no chip — never guessed.
+_item_cats: Dict[str, Dict[str, int]] = {}
+_item_cats_loaded = False
+
+
+def get_item_category() -> Dict[str, Dict[str, int]]:
+    """Return {item_id: {category_id, category_size}} from Postgres."""
+    global _item_cats, _item_cats_loaded
+    if _item_cats_loaded:
+        return _item_cats
+    _item_cats_loaded = True
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return _item_cats
+    try:
+        import psycopg
+
+        with psycopg.connect(dsn, connect_timeout=5) as conn:
+            rows = conn.execute(
+                "SELECT itemid, categoryid, category_size FROM item_category"
+            ).fetchall()
+        _item_cats = {
+            str(r[0]): {"category_id": int(r[1]), "category_size": int(r[2] or 0)}
+            for r in rows
+        }
+        log.info("loaded item_category for %d items", len(_item_cats))
+    except Exception as exc:
+        log.warning("item_category unavailable (%s) — chips omitted", exc)
+    return _item_cats
 
 
 def get_item_stats() -> Dict[str, Dict[str, float]]:
@@ -64,18 +95,28 @@ def get_item_stats() -> Dict[str, Dict[str, float]]:
 
 
 def enrich_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Attach real Postgres stats to reco items; unknown ids keep score only."""
+    """Attach real Postgres stats + real category chips to reco items.
+
+    Unknown ids keep score only; items without a category carry no chip.
+    Nothing here is invented — every field comes from Postgres aggregates
+    (item_stats) or the RetailRocket taxonomy (item_category).
+    """
     stats = get_item_stats()
-    if not stats:
+    cats = get_item_category()
+    if not stats and not cats:
         return items
     out = []
     for it in items:
-        st = stats.get(str(it.get("item_id")))
+        key = str(it.get("item_id"))
+        st = stats.get(key)
         if st:
-            out.append({**it, "views": int(st["views"]), "carts": int(st["carts"]),
-                        "orders": int(st["orders"]), "conv_rate": st["conv_rate"]})
-        else:
-            out.append(it)
+            it = {**it, "views": int(st["views"]), "carts": int(st["carts"]),
+                  "orders": int(st["orders"]), "conv_rate": st["conv_rate"]}
+        ct = cats.get(key)
+        if ct:
+            it = {**it, "category_id": ct["category_id"],
+                  "category_size": ct["category_size"]}
+        out.append(it)
     return out
 
 
@@ -524,6 +565,41 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         except Exception as exc:
             log.error("catalog failed: %s", exc)
             return {"items": []}
+
+    @app.get("/v1/compare")
+    def compare(a: str, b: str):
+        """Manual A-vs-B check: real stats + real categories side by side.
+
+        For humans verifying a ranking decision: why is A above B (or not)?
+        Every field is Postgres-grounded; unknown ids return {"known": False}.
+        Never 5xx.
+        """
+        try:
+            stats = get_item_stats()
+            cats = get_item_category()
+
+            def one(item_id: str) -> Dict[str, Any]:
+                st = stats.get(str(item_id))
+                ct = cats.get(str(item_id))
+                if not st and not ct:
+                    return {"item_id": str(item_id), "known": False}
+                body: Dict[str, Any] = {"item_id": str(item_id),
+                                        "known": True}
+                if st:
+                    body.update({"views": int(st["views"]),
+                                 "carts": int(st["carts"]),
+                                 "orders": int(st["orders"]),
+                                 "conv_rate": st["conv_rate"]})
+                if ct:
+                    body.update({"category_id": ct["category_id"],
+                                 "category_size": ct["category_size"]})
+                return body
+
+            return {"a": one(a), "b": one(b)}
+        except Exception as exc:
+            log.error("compare failed: %s", exc)
+            return {"a": {"item_id": str(a), "known": False},
+                    "b": {"item_id": str(b), "known": False}}
 
     @app.get("/metrics")
     def metrics_prom():

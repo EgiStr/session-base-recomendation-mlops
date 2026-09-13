@@ -72,6 +72,25 @@ def test_catalog_shape_and_never_5xx():
     assert all(it["item_id"] for it in items)
 
 
+def test_category_absent_without_postgres():
+    # Given no DATABASE_URL / When cold session / Then 200, items carry no category keys
+    c = _client()
+    r = c.get("/v1/session/NOCAT")
+    assert r.status_code == 200
+    for it in r.json()["items"]:
+        assert "category_id" not in it and "category_size" not in it
+
+
+def test_compare_shape_and_never_5xx():
+    # Given mock ranker / When GET /v1/compare?a=1&b=2 / Then A/B bodies, never 5xx
+    c = _client()
+    r = c.get("/v1/compare?a=187946&b=461686")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["a"]["item_id"] == "187946" and body["b"]["item_id"] == "461686"
+    assert "known" in body["a"] and "known" in body["b"]
+
+
 def test_events_sink_never_blocks(monkeypatch):
     # Given sink raising / When POST event / Then still 200 (best-effort)
     import api.main as m
