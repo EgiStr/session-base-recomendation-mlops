@@ -8,12 +8,15 @@ log = logging.getLogger("triprank.inference")
 
 
 def score_candidates(session_id: str, candidates: List[str], ranker: Any,
-                     k: int = 20) -> tuple[List[Dict[str, Any]], str]:
+                     k: int = 20, recent: List[str] | None = None) -> tuple[List[Dict[str, Any]], str]:
     """Returns (items, model_version). Falls back gracefully on any failure."""
     try:
         if ranker is None:
             raise RuntimeError("no ranker loaded")
-        ordered = ranker.recommend(session_id, candidates, k=k)
+        try:
+            ordered = ranker.recommend(session_id, candidates, k=k, recent=recent or [])
+        except TypeError:  # legacy ranker without session context
+            ordered = ranker.recommend(session_id, candidates, k=k)
         version = getattr(ranker, "version", "ranker-v1")
         items = [{"item_id": str(i), "score": round(1.0 - idx * 0.01, 4)}
                  for idx, i in enumerate(list(ordered)[:k])]

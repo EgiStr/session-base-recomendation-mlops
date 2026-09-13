@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Deque, Dict, List, Optional
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -152,6 +153,12 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
     state = {"redis_ok": redis_ok, "model_ok": model_ok and ranker is not None}
 
     app = FastAPI(title="TripRank", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3001", "http://web:3001"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["content-type", "x-request-id"],
+    )
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
@@ -162,6 +169,15 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
 
     if ranker is not None and not hasattr(ranker, "version"):
         ranker.version = model_version
+
+    def _popular(k: int) -> List[str]:
+        """Popularity-ordered ids: ranker.popularity when available, else inv."""
+        try:
+            if ranker is not None and hasattr(ranker, "popularity"):
+                return [str(i) for i in ranker.popularity(k)]
+        except Exception:
+            pass
+        return [str(i) for i in inv[:k]]
 
     @app.post("/v1/recommend")
     def recommend(req: RecommendRequest, request: Request):
@@ -197,7 +213,13 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                         reason="no_candidates")
         if not cands:
             return done([], model_version, reason="no_candidates")
-        items, version = score_candidates(key, cands, ranker, k=req.k)
+        # Candidate funnel (spec: ≤500): recent session items + popularity
+        # fill, so the ranker scores hundreds — never the full inventory.
+        if len(cands) > 500:
+            recent_set = [i for i in (sess.get("recent_items") or []) if i in set(cands)]
+            cands = list(dict.fromkeys(recent_set + cands))[:500]
+        items, version = score_candidates(key, cands, ranker, k=req.k,
+                                          recent=sess.get("recent_items") or [])
         if not items and not inv:
             return done([], version, reason="no_candidates")
         return done(items[:req.k], version)
@@ -226,8 +248,12 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                 st["last_event"] = ev.event_type.value
                 _save_state(store, key, st)
             cands = inv if st["recent_items"] else inv[:ev.k]
+            if len(cands) > 500:  # funnel: recent + popularity head
+                recent_set = [i for i in st["recent_items"] if i in set(cands)]
+                cands = list(dict.fromkeys(recent_set + cands))[:500]
             eff = ranker if state["model_ok"] else None
-            items, version = score_candidates(key, cands, eff, k=ev.k)
+            items, version = score_candidates(key, cands, eff, k=ev.k,
+                                              recent=st["recent_items"])
             return done(items[:ev.k], version, st["recent_items"][-20:])
         except Exception as exc:  # never 5xx — fallback baseline
             log.error("events ingest failed: %s", exc)
@@ -257,7 +283,12 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                 fb = [{"item_id": i, "score": 0.5} for i in inv[:k]]
                 return done(fb, "baseline-popularity", [], reason="cold_start")
             eff = ranker if state["model_ok"] else None
-            items, version = score_candidates(key, inv, eff, k=k)
+            cands = inv
+            if len(cands) > 500:  # funnel: recent + popularity head
+                recent_set = [i for i in st["recent_items"] if i in set(cands)]
+                cands = list(dict.fromkeys(recent_set + cands))[:500]
+            items, version = score_candidates(key, cands, eff, k=k,
+                                              recent=st["recent_items"])
             return done(items[:k], version, st["recent_items"][-20:],
                         last_event=st.get("last_event"))
         except Exception as exc:
