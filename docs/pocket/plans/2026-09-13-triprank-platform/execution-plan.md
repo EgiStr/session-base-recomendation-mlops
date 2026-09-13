@@ -2,8 +2,9 @@
 
 **Date:** 2026-09-13
 **Spec:** docs/pocket/spec/2026-09-13-triprank-platform/triprank-full-platform.md
-**Status:** draft
+**Status:** approved
 **Total tasks:** 11
+**Approval:** user GO (goal round) — full chain to running app authorized; dry-run parses (split, 3 phases)
 
 ---
 
