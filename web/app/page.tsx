@@ -171,7 +171,25 @@ export default function ShopPage() {
             {recos.map((r, i) => (
               <li key={r.item_id}>
                 <ProductCard
-                  product={{ item_id: r.item_id, score: r.score, rank: i + 1 }}
+                  product={{
+                    item_id: r.item_id,
+                    score: r.score,
+                    rank: i + 1,
+                    ...(typeof r.views === "number" ? { views: r.views } : {}),
+                    ...(typeof r.carts === "number" ? { carts: r.carts } : {}),
+                    ...(typeof r.orders === "number"
+                      ? { orders: r.orders }
+                      : {}),
+                    ...(typeof r.conv_rate === "number"
+                      ? { conv_rate: r.conv_rate }
+                      : {}),
+                    ...(typeof r.category_id === "number"
+                      ? { category_id: r.category_id }
+                      : {}),
+                    ...(typeof r.category_size === "number"
+                      ? { category_size: r.category_size }
+                      : {}),
+                  }}
                   onClick={() => void fire(r.item_id, "click")}
                   onCart={() => void fire(r.item_id, "cart")}
                   onOrder={() => void fire(r.item_id, "order")}
