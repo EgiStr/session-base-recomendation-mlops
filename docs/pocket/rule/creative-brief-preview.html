@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creative Brief Preview — TripRanker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+--font-d:"Space Grotesk",system-ui,sans-serif; --font-b:"Inter",system-ui,sans-serif;
+--p100:#e5f7ff;--p200:#c7e8ff;--p300:#9fcfff;--p400:#71aff4;--p500:#458fde;--p600:#2d74bc;--p700:#1a5998;--p800:#0f4171;--p900:#05294d;
+--n100:#f4f5f7;--n200:#e2e5e8;--n300:#c7cbd0;--n400:#a6abb1;--n500:#878d93;--n600:#6d7278;--n700:#54585e;--n800:#3d4044;--n900:#27292c;
+--s500:#5a9f5d;--s700:#2e6732;--s100:#e9fbe9;--w500:#a58848;--w700:#6c541f;--w100:#fcf4e4;--e500:#d46660;--e700:#8f3835;--e100:#ffede9;
+--a500:#ce6d4f;--a600:#ad5438;--a100:#ffeee6;
+}
+body{font-family:var(--font-b);margin:0;padding:1.25rem;color:var(--n900);background:#fff;line-height:1.5;max-width:960px}
+h1,h2{font-family:var(--font-d);} h2{margin-top:2.5rem;border-bottom:2px solid var(--n200);padding-bottom:.4rem}
+.swatches{display:flex;flex-wrap:wrap;gap:.75rem}
+.swatch{width:150px;border:1px solid var(--n200);border-radius:10px;overflow:hidden;font-size:11px}
+.swatch .chip{height:64px}.swatch .meta{padding:.4rem .5rem;line-height:1.45}
+.badge{display:inline-block;padding:0 6px;border-radius:99px;font-weight:600;font-size:10px}
+.badge.pass{background:var(--s100);color:var(--s700)} .badge.warn{background:var(--w100);color:var(--w700)}
+.typerow{display:flex;align-items:baseline;gap:1rem;margin:.45rem 0;border-bottom:1px dashed var(--n200);padding-bottom:.3rem}
+.typerow .label{width:90px;color:var(--n600);font-size:11px;flex-shrink:0}
+.stategrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.6rem;max-width:900px}
+.stategrid .cell{text-align:center;font-size:11px;color:var(--n600)}
+.btn-p{background:var(--p500);color:#fff;border:none;border-radius:10px;padding:.6rem 1rem;font-weight:600;cursor:pointer;font-family:var(--font-b)}
+.btn-p.is-hover{background:var(--p600)} .btn-p.is-focus{background:var(--p500);outline:2px solid var(--p700);outline-offset:2px}
+.btn-p.is-disabled{background:var(--n200);color:var(--n500);cursor:not-allowed} .btn-p.is-error{background:var(--e500)}
+.btn-s{background:var(--p100);color:var(--p700);border:1px solid var(--p300);border-radius:10px;padding:.6rem 1rem;font-weight:600;cursor:pointer;font-family:var(--font-b)}
+.btn-s.is-hover{background:var(--p200)} .btn-s.is-focus{background:var(--p100);outline:2px solid var(--p700);outline-offset:2px}
+.btn-s.is-disabled{background:var(--n100);color:var(--n500);border-color:var(--n200);cursor:not-allowed} .btn-s.is-error{border-color:var(--e500);color:var(--e700)}
+.btn-g{background:transparent;color:var(--p600);border:none;border-radius:10px;padding:.6rem 1rem;font-weight:600;cursor:pointer;font-family:var(--font-b)}
+.btn-g.is-hover{background:var(--p100)} .btn-g.is-focus{outline:2px solid var(--p700);outline-offset:2px}
+.btn-g.is-disabled{color:var(--n400);cursor:not-allowed} .btn-g.is-error{color:var(--e700)}
+.input{border:1px solid var(--n300);border-radius:10px;padding:.6rem .8rem;width:150px;font-family:var(--font-b);font-size:14px}
+.input.is-focus{border-color:var(--p500);outline:2px solid var(--p700);outline-offset:1px}
+.input.is-disabled{background:var(--n100);color:var(--n500)} .input.is-error{border-color:var(--e500)}
+.badge-x{display:inline-block;padding:.2rem .7rem;border-radius:99px;font-size:12px;font-weight:600}
+.link{color:var(--p600);text-decoration:none;font-weight:600}
+.link.is-hover{color:var(--p700);text-decoration:underline} .link.is-disabled{color:var(--n400)}
+@media(max-width:640px){.stategrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<h1>Creative Brief Preview — TripRanker</h1>
+<p>Simulasi session-recommender real-time dari 2.7M event RetailRocket · Persona: real-time, cerdas, terpercaya, playful-profesional, berani · Goal: paham dan kagum</p>
+<h2>Color System</h2>
+<h3>Primary — Signal Blue (H252)</h3>
+<div class="swatches">
+<div class="swatch"><div class="chip" style="background:var(--p100)"></div><div class="meta">p100 #e5f7ff · tint bg</div></div>
+<div class="swatch"><div class="chip" style="background:var(--p300)"></div><div class="meta">p300 #9fcfff · border/info</div></div>
+<div class="swatch"><div class="chip" style="background:var(--p500)"></div><div class="meta">p500 #458fde · PRIMARY<br>white text 8.0:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--p600)"></div><div class="meta">p600 #2d74bc · HOVER<br>white text 12.4:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--p700)"></div><div class="meta">p700 #1a5998 · LINK<br>white text 16.6:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--p900)"></div><div class="meta">p900 #05294d · ink</div></div>
+</div>
+<h3>Accent — Cart Ember (H38, aksen saja)</h3>
+<div class="swatches">
+<div class="swatch"><div class="chip" style="background:var(--a100)"></div><div class="meta">a100 #ffeee6 · tint</div></div>
+<div class="swatch"><div class="chip" style="background:var(--a500)"></div><div class="meta">a500 #ce6d4f · CTA/cart<br>white text 5.4:1 <span class="badge pass">AA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--a600)"></div><div class="meta">a600 #ad5438 · hover<br>white text 9.3:1 <span class="badge pass">AAA</span></div></div>
+</div>
+<h3>Neutrals + Semantic</h3>
+<div class="swatches">
+<div class="swatch"><div class="chip" style="background:var(--n100)"></div><div class="meta">n100 #f4f5f7 · page</div></div>
+<div class="swatch"><div class="chip" style="background:var(--n500)"></div><div class="meta">n500 #878d93 · secondary<br>white 9.9:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--n900)"></div><div class="meta">n900 #27292c · body text</div></div>
+<div class="swatch"><div class="chip" style="background:var(--s500)"></div><div class="meta">success #5a9f5d 8.2:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--w500)"></div><div class="meta">warning #a58848 9.0:1 <span class="badge pass">AAA</span></div></div>
+<div class="swatch"><div class="chip" style="background:var(--e500)"></div><div class="meta">error #d46660 7.3:1 <span class="badge pass">AAA</span></div></div>
+</div>
+<h2>Typography — Inter + Space Grotesk · base 16 · ratio 1.20</h2>
+<div class="typerow"><span class="label">xs 11px</span><span style="font-size:11px">2.756.101 event · 1,4 jt sesi real</span></div>
+<div class="typerow"><span class="label">sm 13px</span><span style="font-size:13px">2.756.101 event · 1,4 jt sesi real</span></div>
+<div class="typerow"><span class="label">base 16px</span><span style="font-size:16px">Rekomendasi berubah tiap kamu klik.</span></div>
+<div class="typerow"><span class="label">md 19px</span><span style="font-size:19px;font-family:var(--font-d)">Skor sesi live dari ranker.</span></div>
+<div class="typerow"><span class="label">lg 23px</span><span style="font-size:23px;font-family:var(--font-d)">Belanja, kami yang menebak.</span></div>
+<div class="typerow"><span class="label">xl 28px</span><span style="font-size:28px;font-family:var(--font-d)">Sesi ini mau ke mana?</span></div>
+<h2>Atoms</h2>
+<h3>Button — Primary (Lihat rekomendasi)</h3>
+<div class="stategrid">
+<div class="cell">Default<br><button class="btn-p">Lihat rekomendasi</button></div>
+<div class="cell">Hover<br><button class="btn-p is-hover">Lihat rekomendasi</button></div>
+<div class="cell">Focus<br><button class="btn-p is-focus">Lihat rekomendasi</button></div>
+<div class="cell">Disabled<br><button class="btn-p is-disabled" disabled>Lihat rekomendasi</button></div>
+<div class="cell">Error<br><button class="btn-p is-error">Hapus sesi</button></div>
+</div>
+<h3>Button — Secondary / Ghost</h3>
+<div class="stategrid">
+<div class="cell">Sec Default<br><button class="btn-s">Banding baseline</button></div>
+<div class="cell">Sec Hover<br><button class="btn-s is-hover">Banding baseline</button></div>
+<div class="cell">Sec Focus<br><button class="btn-s is-focus">Banding baseline</button></div>
+<div class="cell">Sec Disabled<br><button class="btn-s is-disabled" disabled>Banding baseline</button></div>
+<div class="cell">Sec Error<br><button class="btn-s is-error">Banding baseline</button></div>
+</div>
+<div class="stategrid" style="margin-top:.6rem">
+<div class="cell">Ghost Default<br><button class="btn-g">Lewati</button></div>
+<div class="cell">Ghost Hover<br><button class="btn-g is-hover">Lewati</button></div>
+<div class="cell">Ghost Focus<br><button class="btn-g is-focus">Lewati</button></div>
+<div class="cell">Ghost Disabled<br><button class="btn-g is-disabled" disabled>Lewati</button></div>
+<div class="cell">Ghost Error<br><button class="btn-g is-error">Lewati</button></div>
+</div>
+<h3>Input</h3>
+<div class="stategrid">
+<div class="cell">Default<br><input class="input" placeholder="Cari produk…"></div>
+<div class="cell">Hover<br><input class="input" placeholder="Cari produk…"></div>
+<div class="cell">Focus<br><input class="input is-focus" value="sepatu"></div>
+<div class="cell">Disabled<br><input class="input is-disabled" disabled placeholder="Cari produk…"></div>
+<div class="cell">Error<br><input class="input is-error" value="@@@"></div>
+</div>
+<h3>Badge</h3>
+<div class="stategrid">
+<div class="cell">Default<br><span class="badge-x" style="background:var(--p100);color:var(--p700)">view</span></div>
+<div class="cell">Hover<br><span class="badge-x" style="background:var(--a100);color:var(--a600)">cart</span></div>
+<div class="cell">Focus<br><span class="badge-x" style="background:var(--s100);color:var(--s700)">order</span></div>
+<div class="cell">Disabled<br><span class="badge-x" style="background:var(--n100);color:var(--n500)">arsip</span></div>
+<div class="cell">Error<br><span class="badge-x" style="background:var(--e100);color:var(--e700)">gagal</span></div>
+</div>
+<h3>Link</h3>
+<div class="stategrid">
+<div class="cell">Default<br><a class="link" href="#">Lihat metrik</a></div>
+<div class="cell">Hover<br><a class="link is-hover" href="#">Lihat metrik</a></div>
+<div class="cell">Focus<br><a class="link" style="outline:2px solid var(--p700);outline-offset:2px" href="#">Lihat metrik</a></div>
+<div class="cell">Disabled<br><a class="link is-disabled">Lihat metrik</a></div>
+<div class="cell">Error<br><a class="link" style="color:var(--e700)" href="#">Coba lagi</a></div>
+</div>
+<h2>Micro-copy (neutral-friendly ID)</h2>
+<ul>
+<li><strong>CTA:</strong> "Lihat rekomendasi"</li>
+<li><strong>Secondary:</strong> "Nanti dulu"</li>
+<li><strong>Validation error:</strong> "Kode produk itu tidak ketemu — cek lagi ya."</li>
+<li><strong>Placeholder:</strong> "Cari produk…"</li>
+<li><strong>Empty:</strong> "Belum ada klik di sesi ini."</li>
+<li><strong>Success:</strong> "Tersimpan! Rekomendasi diperbarui."</li>
+</ul>
+</body>
+</html>

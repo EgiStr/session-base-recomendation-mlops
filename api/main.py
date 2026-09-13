@@ -12,10 +12,23 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.models.inference import score_candidates
+from src.models.retailrocket_ranker import RetailRocketRanker
 
 log = logging.getLogger("triprank.api")
 
 P95_WINDOW = 1000
+
+# Production model: baked artifact loaded once at import. Falls back to
+# synthetic inventory only if artifacts are absent (dev/test path).
+try:
+    PROD_RANKER: Any = RetailRocketRanker()
+    PROD_INVENTORY: List[str] = PROD_RANKER.inventory
+    PROD_VERSION: str = PROD_RANKER.version
+    log.info("loaded production ranker %s (%d items)",
+             PROD_VERSION, len(PROD_INVENTORY))
+except Exception as exc:  # artifacts missing (tests, dev) — lazy fallback
+    log.warning("production ranker unavailable: %s", exc)
+    PROD_RANKER, PROD_INVENTORY, PROD_VERSION = None, None, "ranker-v1"
 
 
 class RecommendRequest(BaseModel):
@@ -39,9 +52,17 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                model_ok: bool = True,
                model_version: str = "ranker-v1") -> FastAPI:
     store = session_store if session_store is not None else {}
-    inv = inventory if inventory is not None else [f"H{i:03d}" for i in range(1, 101)]
+    if inventory is not None:
+        inv = inventory
+    elif PROD_INVENTORY is not None:
+        inv = PROD_INVENTORY
+    else:
+        inv = [f"H{i:03d}" for i in range(1, 101)]
+    if ranker is None and PROD_RANKER is not None:
+        ranker = PROD_RANKER
+        model_version = PROD_VERSION
     latencies: Deque[float] = deque(maxlen=P95_WINDOW)
-    state = {"redis_ok": redis_ok, "model_ok": model_ok}
+    state = {"redis_ok": redis_ok, "model_ok": model_ok and ranker is not None}
 
     app = FastAPI(title="TripRank", version="0.1.0")
 

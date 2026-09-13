@@ -1,0 +1,15 @@
+{
+  "version": "ranker-retailrocket-v1",
+  "dataset_version": "retailrocket-hf@2dce403bf472",
+  "metrics": {
+    "ndcg@10": 0.9777219505787383,
+    "recall@20": 0.9947114324046996,
+    "mrr@10": 0.9726925630810094
+  },
+  "baseline": {
+    "ndcg@10": 0.7273830142368068,
+    "recall@20": 0.9655830800803157,
+    "mrr@10": 0.6428859956997408
+  },
+  "trained_at": 1789309902
+}
