@@ -28,6 +28,14 @@
   mlflow:5000, prometheus:9090, grafana:3000 (+ guava-mysql eksternal)
 - Images: triple-recommendation-mlops-api + -web built locally
 
+## Browser live proof (Playwright, 2026-09-13)
+- `/` shop: cold-start serves TRUE popularity (187946 #1, skor 0.500), 0 console errors
+- Click "Lihat produk 187946" → sesi 1 klik → `ranker-retailrocket-v1 · 74.17ms`
+- `/mlops`: API ok, Ready ready, P95 74.17ms / 26 sampel (live dari /metrics),
+  NDCG@10 +25.0pp, Recall@20 +2.9pp, MRR@10 +33.0pp, gate PASS
+- Fixes: CORS middleware (web:3001 ↔ api:8000), cold-start via ranker.popularity()
+  (inventory.csv ascending ≠ popularity order)
+
 ## Commits
 - a790c26 real-data training + production ranker · d353507 sim endpoints + brand + scaffold
 - bd61b7f postgres reproduction · 6b844a3 web app · 2440000 compose web + live proof
