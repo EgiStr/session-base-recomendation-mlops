@@ -16,6 +16,17 @@ services:
       - mlflow
       - postgres
 
+  streaming:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.streaming
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - kafka
+      - redis
+
   mlflow:
     image: python:3.12-slim
     ports:
@@ -77,6 +88,9 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
 
   web:
     build:

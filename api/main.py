@@ -3,6 +3,7 @@ GET /health, GET /ready, GET /metrics."""
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from collections import deque
@@ -11,13 +12,18 @@ from typing import Any, Deque, Dict, List, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from pydantic import BaseModel, Field
 
 from src.models.inference import score_candidates
 from src.models.retailrocket_ranker import RetailRocketRanker
+from src.monitoring.metrics import Metrics
 
 log = logging.getLogger("triprank.api")
+
+# Module-level Prometheus metrics on their own registry (scraped at GET /metrics).
+metrics = Metrics(CollectorRegistry())
 
 P95_WINDOW = 1000
 
@@ -125,6 +131,21 @@ def _save_state(store: Any, key: str, st: Dict[str, Any]) -> None:
                   "seen": set(st["seen"])}
 
 
+def _session_exists(store: Any, key: str) -> bool:
+    """True when the session key exists (even with empty history)."""
+    try:
+        if hasattr(store, "exists"):
+            return bool(store.exists(key))
+        if hasattr(store, "hgetall"):
+            return bool(store.hgetall(key))
+        get = getattr(store, "get", None)
+        if callable(get):
+            return get(key) is not None
+    except Exception:
+        return False
+    return False
+
+
 def _p95(samples: List[float]) -> float:
     if not samples:
         return 0.0
@@ -133,13 +154,35 @@ def _p95(samples: List[float]) -> float:
     return s[idx]
 
 
+def _resolve_store(session_store: Optional[Any],
+                     redis_url: Optional[str]) -> tuple[Any, bool]:
+    """Return (store, redis_ok): Redis client when reachable, else dict fallback."""
+    if session_store is not None:
+        return session_store, True
+    url = redis_url or os.environ.get("REDIS_URL")
+    if not url:
+        return {}, True
+    try:
+        import redis as _redis
+
+        client = _redis.Redis.from_url(url, decode_responses=True)
+        client.ping()
+        log.info("connected to Redis at %s", url)
+        return client, True
+    except Exception as exc:
+        log.warning("redis unavailable (%s) — falling back to in-process store", exc)
+        return {}, False
+
+
 def create_app(session_store: Optional[Dict[str, Any]] = None,
                ranker: Any = None,
                inventory: Optional[List[str]] = None,
                redis_ok: bool = True,
                model_ok: bool = True,
-               model_version: str = "ranker-v1") -> FastAPI:
-    store = session_store if session_store is not None else {}
+               model_version: str = "ranker-v1",
+               redis_url: Optional[str] = None) -> FastAPI:
+    store, _redis_reachable = _resolve_store(session_store, redis_url)
+    redis_ok = bool(redis_ok and _redis_reachable)
     if inventory is not None:
         inv = inventory
     elif PROD_INVENTORY is not None:
@@ -184,7 +227,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         t0 = time.perf_counter()
         rid = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
         key = f"{req.track}:{req.session_id}"
-        sess = store.get(key)
+        st = _get_state(store, key)
 
         def elapsed_ms() -> float:
             return (time.perf_counter() - t0) * 1000.0
@@ -192,6 +235,8 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         def done(items, version, reason=None):
             ms = elapsed_ms()
             latencies.append(ms)
+            metrics.observe_request(str(version), ms / 1000.0,
+                                    ok=(version != "fallback"))
             body = {"request_id": rid, "session_id": req.session_id,
                     "model_version": version, "latency_ms": round(ms, 2),
                     "items": items}
@@ -199,7 +244,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                 body["reason"] = reason
             return body
 
-        if sess is None:  # cold-start → popularity fallback
+        if not _session_exists(store, key):  # cold-start → popularity fallback
             pop = _popular(req.k)
             if not pop:
                 return done([], "baseline-popularity", reason="no_candidates")
@@ -208,19 +253,18 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         if not state["model_ok"]:
             items, version = score_candidates(key, inv[:req.k], None, k=req.k)
             return done(items, "fallback")
-        cands = inv[:req.k] if not sess.get("recent_items") else inv
+        cands = inv[:req.k] if not st["recent_items"] else inv
         if not cands and not inv:
-            return done([], sess.get("model_version", model_version),
-                        reason="no_candidates")
+            return done([], model_version, reason="no_candidates")
         if not cands:
             return done([], model_version, reason="no_candidates")
         # Candidate funnel (spec: ≤500): recent session items + popularity
         # fill, so the ranker scores hundreds — never the full inventory.
         if len(cands) > 500:
-            recent_set = [i for i in (sess.get("recent_items") or []) if i in set(cands)]
+            recent_set = [i for i in (st["recent_items"] or []) if i in set(cands)]
             cands = list(dict.fromkeys(recent_set + cands))[:500]
         items, version = score_candidates(key, cands, ranker, k=req.k,
-                                          recent=sess.get("recent_items") or [])
+                                          recent=st["recent_items"] or [])
         if not items and not inv:
             return done([], version, reason="no_candidates")
         return done(items[:req.k], version)
@@ -235,6 +279,8 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         def done(items, version, recent, reason=None):
             ms = round((time.perf_counter() - t0) * 1000.0, 2)
             latencies.append(ms)
+            metrics.observe_request(str(version), ms / 1000.0,
+                                    ok=(version != "fallback"))
             return {"request_id": rid, "session_id": ev.session_id,
                     "model_version": version, "latency_ms": ms,
                     "items": items, "recent_items": recent,
@@ -271,6 +317,8 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         def done(items, version, recent, last_event=None, reason=None):
             ms = round((time.perf_counter() - t0) * 1000.0, 2)
             latencies.append(ms)
+            metrics.observe_request(str(version), ms / 1000.0,
+                                    ok=(version != "fallback"))
             return {"request_id": rid, "session_id": session_id,
                     "model_version": version, "latency_ms": ms,
                     "recent_items": recent, "items": items,
@@ -307,8 +355,25 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             return {"status": "ready"}
         return JSONResponse({"status": "not-ready"}, status_code=503)
 
+    @app.get("/v1/catalog")
+    def catalog(n: int = 12):
+        """Popularity-ordered catalog head (web team contract). Never 5xx."""
+        try:
+            n = max(1, min(int(n), 100))
+            ids = _popular(n)
+            return {"items": [{"item_id": str(i), "rank": idx + 1}
+                              for idx, i in enumerate(ids[:n])]}
+        except Exception as exc:
+            log.error("catalog failed: %s", exc)
+            return {"items": []}
+
     @app.get("/metrics")
-    def metrics():
+    def metrics_prom():
+        return Response(generate_latest(metrics.registry),
+                        media_type=CONTENT_TYPE_LATEST)
+
+    @app.get("/metrics/json")
+    def metrics_json():
         return {"p95_ms": round(_p95(list(latencies)), 2),
                 "samples": len(latencies)}
 
