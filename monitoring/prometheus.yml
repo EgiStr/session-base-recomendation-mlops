@@ -4,4 +4,6 @@ global:
 scrape_configs:
   - job_name: triprank-api
     static_configs:
-      - targets: ["api:8000"]
+      # Local-dev mode: API runs on host uvicorn, not as a compose service.
+      # Flip back to ["api:8000"] only when API runs as a compose service.
+      - targets: ["host.docker.internal:8000"]
