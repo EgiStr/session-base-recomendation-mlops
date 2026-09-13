@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     "Belanja, kami yang menebak. Simulasi rekomendasi sesi real-time dari 2,7 jt event RetailRocket + MLOps.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="id"

@@ -1,69 +1,176 @@
-import Image from "next/image";
+/* Hallmark · macrostructure: Workbench · tone: playful-profesional cerdas · anchor hue: 252 Signal Blue
+ * Shop workbench: katalog kiri (tap → event), rekomendasi live kanan. Mobile-first, bottom tab offset.
+ * pre-emit critique: P5 H5 E4 S5 R5 V5
+ */
+"use client";
 
-export default function Home() {
+import { useCallback, useEffect, useMemo, useState } from "react";
+import ProductCard from "../components/ProductCard";
+import TabBar from "../components/TabBar";
+import { getSession, postEvent, type RecoItem } from "../lib/api";
+
+const SID_KEY = "tripranker:sid";
+const CATALOG = [
+  "187946",
+  "461686",
+  "5411",
+  "213834",
+  "321422",
+  "456881",
+  "123456",
+  "789012",
+  "345678",
+  "901234",
+  "112233",
+  "445566",
+];
+
+function getSid(): string {
+  let sid = localStorage.getItem(SID_KEY);
+  if (!sid) {
+    sid = `shop-${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(SID_KEY, sid);
+  }
+  return sid;
+}
+
+export default function ShopPage() {
+  const [sid, setSid] = useState("");
+  const [recos, setRecos] = useState<RecoItem[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [meta, setMeta] = useState({ version: "—", ms: 0, req: "—" });
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async (id: string) => {
+    try {
+      const s = await getSession(id, 10);
+      setRecos(s.items);
+      setRecent(s.recent_items);
+      setMeta({ version: s.model_version, ms: s.latency_ms, req: s.request_id });
+      setError("");
+    } catch {
+      setError("API belum hidup — jalankan docker compose up.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = getSid();
+    setSid(id);
+    void refresh(id);
+  }, [refresh]);
+
+  const fire = useCallback(
+    async (itemId: string, type: "click" | "cart" | "order") => {
+      setPending(itemId + type);
+      try {
+        const out = await postEvent(sid, itemId, type, 10);
+        setRecos(out.items);
+        setRecent(out.recent_items);
+        setMeta({ version: out.model_version, ms: out.latency_ms, req: out.request_id });
+        setError("");
+      } catch {
+        setError("Gagal kirim event — cek koneksi API.");
+      } finally {
+        setPending(null);
+      }
+    },
+    [sid]
+  );
+
+  const counts = useMemo(
+    () => ({ klik: recent.length, reco: recos.length }),
+    [recent, recos]
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="mx-auto w-full max-w-lg px-4 pb-24 pt-4">
+      <header className="rounded-brand bg-primary-700 p-4 text-white">
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary-200">
+          TripRanker · simulasi live
+        </p>
+        <h1 className="font-display text-xl font-bold leading-tight">
+          Belanja, kami yang menebak.
+        </h1>
+        <p className="mt-1 text-sm text-primary-100">
+          Ketuk produk — ranker LightGBM (NDCG@10 0.978) menata ulang rekomendasi
+          tiap event. Sesi {sid || "…"} · {counts.klik} klik.
+        </p>
+        <p className="mt-2 font-mono text-[11px] text-primary-200">
+          {meta.version} · {meta.ms}ms · {meta.req}
+        </p>
+      </header>
+
+      {error && (
+        <p role="alert" className="mt-3 rounded-brand bg-error-100 p-3 text-sm text-error-700">
+          {error}
+        </p>
+      )}
+
+      <section aria-label="Rekomendasi untukmu" className="mt-5">
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="font-display text-md font-bold text-neutral-900">
+            Rekomendasi untukmu
+          </h2>
+          <span className="rounded-full bg-success-100 px-2 py-0.5 text-xs font-semibold text-success-700">
+            live
+          </span>
+        </div>
+        {recos.length === 0 ? (
+          <p className="rounded-brand border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+            Belum ada klik di sesi ini. Ketuk produk di bawah untuk mulai.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+        ) : (
+          <ol className="grid grid-cols-2 gap-2.5">
+            {recos.map((r, i) => (
+              <li key={r.item_id}>
+                <ProductCard
+                  product={{ item_id: r.item_id, score: r.score, rank: i + 1 }}
+                  onClick={() => void fire(r.item_id, "click")}
+                  onCart={() => void fire(r.item_id, "cart")}
+                  pending={pending !== null}
+                />
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section aria-label="Katalog" className="mt-6">
+        <h2 className="mb-2 font-display text-md font-bold text-neutral-900">
+          Katalog populer
+        </h2>
+        <div className="grid grid-cols-2 gap-2.5">
+          {CATALOG.map((id) => (
+            <ProductCard
+              key={id}
+              product={{ item_id: id }}
+              onClick={() => void fire(id, "click")}
+              onCart={() => void fire(id, "cart")}
+              pending={pending !== null}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          ))}
         </div>
-      </main>
+      </section>
+
+      {recent.length > 0 && (
+        <section aria-label="Riwayat sesi" className="mt-6">
+          <h2 className="mb-2 font-display text-md font-bold text-neutral-900">
+            Jejak sesi ({recent.length})
+          </h2>
+          <div className="flex flex-wrap gap-1.5">
+            {recent.slice(-12).map((id, i) => (
+              <span
+                key={`${id}-${i}`}
+                className="rounded-full bg-primary-100 px-2.5 py-1 text-xs font-semibold text-primary-700"
+              >
+                {id}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+      <TabBar />
     </div>
   );
 }

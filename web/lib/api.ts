@@ -34,7 +34,7 @@ export async function postEvent(
     }),
   });
   if (!r.ok) throw new Error(`events ${r.status}`);
-  return r.json();
+  return (await r.json()) as EventOut;
 }
 
 export async function getSession(
@@ -45,17 +45,24 @@ export async function getSession(
     `${API_BASE}/v1/session/${encodeURIComponent(sessionId)}?track=retailrocket&k=${k}`
   );
   if (!r.ok) throw new Error(`session ${r.status}`);
-  return r.json();
+  return (await r.json()) as SessionOut;
 }
 
-export async function getHealth(): Promise<{
-  status: string;
-  ready?: boolean;
-  model_version?: string;
-}> {
-  const h = await fetch(`${API_BASE}/health`).then((r) => r.json());
-  const rd = await fetch(`${API_BASE}/ready`)
-    .then((r) => ({ ok: r.ok, body: r.json() } as never))
-    .catch(() => null);
-  return { status: h.status, ready: !!(rd as { ok: boolean } | null)?.ok };
+export async function getHealth(): Promise<{ status: string; ready: boolean }> {
+  const h = (await fetch(`${API_BASE}/health`).then((r) =>
+    r.json()
+  )) as { status: string };
+  let ready = false;
+  try {
+    const rd = await fetch(`${API_BASE}/ready`);
+    ready = rd.ok;
+  } catch {
+    ready = false;
+  }
+  return { status: h.status, ready };
+}
+
+export async function getP95(): Promise<{ p95_ms: number; samples: number }> {
+  const r = await fetch(`${API_BASE}/metrics`).then((r) => r.json());
+  return r as { p95_ms: number; samples: number };
 }
