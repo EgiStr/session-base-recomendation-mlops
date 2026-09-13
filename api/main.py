@@ -27,6 +27,90 @@ metrics = Metrics(CollectorRegistry())
 
 P95_WINDOW = 1000
 
+# Item stats from Postgres (views/carts/orders/conv per itemid). Lazy-loaded,
+# cached in-process, never fatal: {} when DATABASE_URL is absent/unreachable
+# (tests, dev without postgres). Real data only — no synthetic fill.
+_item_stats: Dict[str, Dict[str, float]] = {}
+_item_stats_loaded = False
+
+
+def get_item_stats() -> Dict[str, Dict[str, float]]:
+    """Return {item_id: {views, carts, orders, conv_rate}} from Postgres."""
+    global _item_stats, _item_stats_loaded
+    if _item_stats_loaded:
+        return _item_stats
+    _item_stats_loaded = True
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return _item_stats
+    try:
+        import psycopg
+
+        with psycopg.connect(dsn, connect_timeout=5) as conn:
+            rows = conn.execute(
+                "SELECT itemid, views, carts, orders, item_conv_rate"
+                " FROM item_stats"
+            ).fetchall()
+        _item_stats = {
+            str(r[0]): {"views": float(r[1] or 0), "carts": float(r[2] or 0),
+                        "orders": float(r[3] or 0),
+                        "conv_rate": float(r[4] or 0.0)}
+            for r in rows
+        }
+        log.info("loaded item_stats for %d items", len(_item_stats))
+    except Exception as exc:
+        log.warning("item_stats unavailable (%s) — stats omitted", exc)
+    return _item_stats
+
+
+def enrich_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attach real Postgres stats to reco items; unknown ids keep score only."""
+    stats = get_item_stats()
+    if not stats:
+        return items
+    out = []
+    for it in items:
+        st = stats.get(str(it.get("item_id")))
+        if st:
+            out.append({**it, "views": int(st["views"]), "carts": int(st["carts"]),
+                        "orders": int(st["orders"]), "conv_rate": st["conv_rate"]})
+        else:
+            out.append(it)
+    return out
+
+
+def sink_app_event(ev: Any, version: str) -> None:
+    """Best-effort persist of a web event to Postgres events_app (MLOps cycle).
+
+    Never raises: missing DB / bad item id / duplicate event_id are all
+    swallowed (logged at debug/warning). Response path must never block.
+    """
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        return
+    try:
+        itemid = int(ev.item_id)
+    except (TypeError, ValueError):
+        return
+    try:
+        ts_ms = int(ev.timestamp) * 1000 if int(ev.timestamp) < 10**12 else int(ev.timestamp)
+    except (TypeError, ValueError):
+        ts_ms = int(time.time() * 1000)
+    try:
+        import psycopg
+
+        with psycopg.connect(dsn, connect_timeout=3) as conn:
+            conn.execute(
+                "INSERT INTO events_app"
+                " (event_id, session_id, timestamp_ms, itemid, event, track, model_version)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (event_id) DO NOTHING",
+                (str(ev.event_id), str(ev.session_id), ts_ms, itemid,
+                 str(ev.event_type.value), str(ev.track), str(version)),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.warning("events_app sink skipped (%s)", exc)
+
 # Production model: baked artifact loaded once at import. Falls back to
 # synthetic inventory only if artifacts are absent (dev/test path).
 try:
@@ -65,6 +149,10 @@ class EventIn(BaseModel):
 class RecoItem(BaseModel):
     item_id: str
     score: float
+    views: Optional[int] = None
+    carts: Optional[int] = None
+    orders: Optional[int] = None
+    conv_rate: Optional[float] = None
 
 
 class EventOut(BaseModel):
@@ -192,6 +280,11 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
     if ranker is None and PROD_RANKER is not None:
         ranker = PROD_RANKER
         model_version = PROD_VERSION
+    elif ranker is not None and getattr(ranker, "version", None):
+        try:
+            model_version = str(ranker.version)
+        except Exception:
+            pass
     latencies: Deque[float] = deque(maxlen=P95_WINDOW)
     state = {"redis_ok": redis_ok, "model_ok": model_ok and ranker is not None}
 
@@ -217,7 +310,9 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         """Popularity-ordered ids: ranker.popularity when available, else inv."""
         try:
             if ranker is not None and hasattr(ranker, "popularity"):
-                return [str(i) for i in ranker.popularity(k)]
+                got = [str(i) for i in ranker.popularity(k)]
+                if got:
+                    return got
         except Exception:
             pass
         return [str(i) for i in inv[:k]]
@@ -248,7 +343,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             pop = _popular(req.k)
             if not pop:
                 return done([], "baseline-popularity", reason="no_candidates")
-            return done([{"item_id": i, "score": 0.5} for i in pop],
+            return done(enrich_items([{"item_id": i, "score": 0.5} for i in pop]),
                         "baseline-popularity")
         if not state["model_ok"]:
             items, version = score_candidates(key, inv[:req.k], None, k=req.k)
@@ -269,7 +364,7 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             return done([], version, reason="no_candidates")
         return done(items[:req.k], version)
 
-    @app.post("/v1/events", response_model=EventOut)
+    @app.post("/v1/events", response_model=EventOut, response_model_exclude_none=True)
     def ingest_event(ev: EventIn, request: Request):
         """Simulation ingest: apply canonical event → state → re-rank, one round-trip."""
         t0 = time.perf_counter()
@@ -301,13 +396,22 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
             eff = ranker if state["model_ok"] else None
             items, version = score_candidates(key, cands, eff, k=ev.k,
                                               recent=st["recent_items"])
-            return done(items[:ev.k], version, st["recent_items"][-20:])
+            out = done(enrich_items(items[:ev.k]), version, st["recent_items"][-20:])
+            # MLOps cycle: persist AFTER response is built. Belt-and-suspenders:
+            # sink_app_event never raises by contract, but even a monkeypatched
+            # or future failure here must not touch the response path.
+            try:
+                sink_app_event(ev, version)
+            except Exception as exc:
+                log.warning("events_app sink failed (%s)", exc)
+            return out
         except Exception as exc:  # never 5xx — fallback baseline
             log.error("events ingest failed: %s", exc)
             fb = [{"item_id": i, "score": 0.5} for i in _popular(ev.k)]
-            return done(fb, "fallback", [], reason="fallback")
+            return done(enrich_items(fb), "fallback", [], reason="fallback")
 
-    @app.get("/v1/session/{session_id}", response_model=SessionOut)
+    @app.get("/v1/session/{session_id}", response_model=SessionOut,
+             response_model_exclude_none=True)
     def get_session(session_id: str, request: Request, track: str = "retailrocket",
                     k: int = 20):
         t0 = time.perf_counter()
@@ -338,12 +442,64 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
                 cands = list(dict.fromkeys(recent_set + cands))[:500]
             items, version = score_candidates(key, cands, eff, k=k,
                                               recent=st["recent_items"])
-            return done(items[:k], version, st["recent_items"][-20:],
+            return done(enrich_items(items[:k]), version, st["recent_items"][-20:],
                         last_event=st.get("last_event"))
         except Exception as exc:
             log.error("session fetch failed: %s", exc)
             fb = [{"item_id": i, "score": 0.5} for i in _popular(k)]
-            return done(fb, "fallback", [], reason="fallback")
+            return done(enrich_items(fb), "fallback", [], reason="fallback")
+
+    @app.get("/v1/monitor")
+    def monitor():
+        """MLOps monitoring: live traffic (events_app) + serving health. Never 5xx."""
+        body: Dict[str, Any] = {
+            "model_version": model_version,
+            "serving": {"p95_ms": round(_p95(list(latencies)), 2),
+                        "samples": len(latencies)},
+            "traffic": None,
+        }
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            body["reason"] = "no_database"
+            return body
+        try:
+            import psycopg
+
+            with psycopg.connect(dsn, connect_timeout=5) as conn:
+                total = conn.execute("SELECT count(*) FROM events_app").fetchone()[0]
+                by_event = dict(conn.execute(
+                    "SELECT event, count(*) FROM events_app GROUP BY event").fetchall())
+                sessions = conn.execute(
+                    "SELECT count(DISTINCT session_id) FROM events_app").fetchone()[0]
+                last_ts = conn.execute(
+                    "SELECT max(timestamp_ms) FROM events_app").fetchone()[0]
+                top_now = [r[0] for r in conn.execute(
+                    "SELECT itemid FROM events_app WHERE event='click'"
+                    " GROUP BY itemid ORDER BY count(*) DESC LIMIT 100").fetchall()]
+            clicks = int(by_event.get("click", 0) or 0)
+            carts = int(by_event.get("cart", 0) or 0)
+            orders = int(by_event.get("order", 0) or 0)
+            # Drift proxy: overlap of live top-100 clicks vs trained popularity head.
+            trained_head = set()
+            try:
+                if ranker is not None and hasattr(ranker, "popularity"):
+                    trained_head = {int(i) for i in ranker.popularity(100)}
+            except Exception:
+                pass
+            overlap = (len(set(top_now) & trained_head) / 100.0) if trained_head else None
+            body["traffic"] = {
+                "events": int(total), "sessions": int(sessions),
+                "clicks": clicks, "carts": carts, "orders": orders,
+                "cart_rate": round(carts / clicks, 4) if clicks else 0.0,
+                "order_rate": round(orders / clicks, 4) if clicks else 0.0,
+                "last_event_ms": int(last_ts) if last_ts else None,
+                "top100_overlap": round(overlap, 4) if overlap is not None else None,
+            }
+        except Exception as exc:
+            log.warning("monitor degraded (%s)", exc)
+            body["traffic"] = None
+            body["reason"] = "monitor_degraded"
+        return body
 
     @app.get("/health")
     def health():
@@ -357,12 +513,14 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
 
     @app.get("/v1/catalog")
     def catalog(n: int = 12):
-        """Popularity-ordered catalog head (web team contract). Never 5xx."""
+        """Popularity-ordered catalog head with real Postgres stats. Never 5xx."""
         try:
             n = max(1, min(int(n), 100))
             ids = _popular(n)
-            return {"items": [{"item_id": str(i), "rank": idx + 1}
-                              for idx, i in enumerate(ids[:n])]}
+            items = enrich_items([{"item_id": str(i), "score": 0.5}
+                                  for i in ids[:n]])
+            return {"items": [{**it, "rank": idx + 1}
+                              for idx, it in enumerate(items)]}
         except Exception as exc:
             log.error("catalog failed: %s", exc)
             return {"items": []}

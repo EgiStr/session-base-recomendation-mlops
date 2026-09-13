@@ -10,19 +10,45 @@ import hashlib
 import json
 import os
 import time
+import urllib.request
 
 import mlflow
 import pandas as pd
+from mlflow.tracking import MlflowClient
 
 from src.evaluation.evaluate import evaluate
 from src.evaluation.quality_gate import evaluate_gate
 from src.models.ranker import LGBMRanker
+from src.registry.registry import ModelRegistry
 from src.training.dataset import FEATURES, build_training_frame
 from src.training.train import run_training
 
 EVENTS_CSV = "data/raw_hf/data/RetailRocket-Recommender-Data/data/events.csv"
 ARTIFACT_DIR = "artifacts/ranker-retailrocket-v1"
 MODEL_VERSION = "ranker-retailrocket-v1"
+MODEL_NAME = "TripRanker"
+DOCKER_TRACKING_URI = "http://localhost:5000"
+FALLBACK_TRACKING_URI = "sqlite:///mlruns.db"
+
+
+def _probe_tracking_uri(uri: str, timeout_s: int = 5) -> bool:
+    try:
+        with urllib.request.urlopen(uri, timeout=timeout_s) as resp:
+            return 200 <= resp.status < 400
+    except Exception:
+        return False
+
+
+def resolve_tracking_uri(flag: str | None) -> str:
+    """--tracking-uri flag > MLFLOW_TRACKING_URI env > docker probe > sqlite fallback."""
+    if flag:
+        return flag
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        return env_uri
+    if _probe_tracking_uri(DOCKER_TRACKING_URI, timeout_s=5):
+        return DOCKER_TRACKING_URI
+    return FALLBACK_TRACKING_URI
 
 
 def split_time_holdout(df: pd.DataFrame, holdout_days: int = 7):
@@ -50,10 +76,12 @@ def main() -> dict:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sessions", type=int, default=200000)
     ap.add_argument("--holdout-days", type=int, default=7)
-    ap.add_argument("--tracking-uri", default="mlruns")
+    ap.add_argument("--tracking-uri", default=None)
     args = ap.parse_args()
 
-    mlflow.set_tracking_uri(args.tracking_uri)
+    tracking_uri = resolve_tracking_uri(args.tracking_uri)
+    mlflow.set_tracking_uri(tracking_uri)
+    print(f"TRACKING_URI {tracking_uri}", flush=True)
     df = pd.read_csv(EVENTS_CSV)
     row_hash = hashlib.sha256(str(len(df)).encode()).hexdigest()[:12]
     dataset_version = f"retailrocket-hf@{row_hash}"
@@ -115,9 +143,23 @@ def main() -> dict:
                         params={"algo": "lgbm-lambdarank", "sessions": args.sessions,
                                 "n_estimators": 100, "num_leaves": 31,
                                 **{f"metric_{k}".replace("@", "_at_"): v
-                                   for k, v in m_ranker.items() if k != "seeds"}})
-    print("MLFLOW", info["run_id"], "ARTIFACTS", ARTIFACT_DIR, flush=True)
-    return meta_out
+                                   for k, v in m_ranker.items() if k != "seeds"}},
+                        metrics={"ndcg_at_10": float(m_ranker["ndcg@10"]),
+                                 "recall_at_20": float(m_ranker["recall@20"]),
+                                 "mrr_at_10": float(m_ranker["mrr@10"]),
+                                 "baseline_ndcg_at_10": float(m_base["ndcg@10"])},
+                        artifacts=[os.path.join(ARTIFACT_DIR, "model.pkl"),
+                                   os.path.join(ARTIFACT_DIR, "meta.json"),
+                                   os.path.join(ARTIFACT_DIR, "popularity.csv")],
+                        artifact_path="model")
+    print("MLFLOW", info["run_id"], "ARTIFACTS", ARTIFACT_DIR,
+          "URI", tracking_uri, flush=True)
+
+    registry = ModelRegistry(MlflowClient(tracking_uri=tracking_uri))
+    reg = registry.register_model(MODEL_NAME, run_id=info["run_id"], alias="Champion")
+    print("REGISTRY", reg, flush=True)
+    return {**meta_out, "run_id": info["run_id"], "tracking_uri": tracking_uri,
+            "registry": reg}
 
 
 if __name__ == "__main__":
