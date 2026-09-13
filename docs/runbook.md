@@ -9,9 +9,10 @@
 - Docker Desktop running; ports free: 3001, 3000, 5000, 5433, 6379, 8000, 9090, 9092.
 - Dataset CSV at `data/raw_hf/data/RetailRocket-Recommender-Data/data/`
   (`events.csv`, `item_properties_part1/2.csv`, `category_tree.csv`).
-  UNVERIFIED: exact public download command — the files were provisioned via
-  HuggingFace `DanielKiani/RetailRocket-Recommender-Data`; re-verify the
-  dataset URL before documenting a fetch step.
+  Not in git — fetch once (auth-free, ~940MB):
+  `pip install huggingface_hub && python scripts/fetch_retailrocket.py`.
+  Layout verified against HF repo `DanielKiani/RetailRocket-Recommender-Data`
+  (allow-pattern `data/RetailRocket-Recommender-Data/data/*.csv`).
 - Python 3.12 + `pip install -r requirements.txt` (tests, retrain scripts).
 - Node 22 (only for local web dev; docker path needs none).
 
@@ -19,6 +20,7 @@
 
 ```powershell
 docker compose up -d postgres            # wait healthy (~10s)
+python scripts/fetch_retailrocket.py     # once: HF download ~940MB (skip if data/raw_hf present)
 $env:DATABASE_URL='postgresql://triprank:triprank@localhost:5433/triprank'
 psql $env:DATABASE_URL -f sql/01_schema.sql
 python scripts/db/load_retailrocket.py   # COPY-stream ~2.76M rows, ~20s

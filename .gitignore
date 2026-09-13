@@ -5,6 +5,7 @@ venv/
 mlruns/
 *.db
 data/raw/
+data/raw_hf/
 data/processed/
 data/features/
 .pytest_cache/
