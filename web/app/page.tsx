@@ -5,6 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AuditPanel from "../components/AuditPanel";
 import ProductCard, { type Product } from "../components/ProductCard";
 import TabBar from "../components/TabBar";
 import {
@@ -50,6 +51,7 @@ export default function ShopPage() {
   const [catalog, setCatalog] = useState<Product[]>(VERIFIED_REAL);
   const [catalogLive, setCatalogLive] = useState(false);
   const [meta, setMeta] = useState({ version: "—", ms: 0, req: "—" });
+  const [lastEvent, setLastEvent] = useState("—");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -58,6 +60,7 @@ export default function ShopPage() {
       const s = await getSession(id, 10);
       setRecos(s.items);
       setRecent(s.recent_items);
+      setLastEvent(s.last_event ?? "—");
       setMeta({ version: s.model_version, ms: s.latency_ms, req: s.request_id });
       setError("");
     } catch {
@@ -69,7 +72,8 @@ export default function ShopPage() {
     const id = getSid();
     setSid(id);
     void refresh(id);
-    // Live catalog; falls back to VERIFIED_REAL when /v1/catalog 404s.
+    // Live catalog with real stats + real categories; falls back to
+    // VERIFIED_REAL when /v1/catalog 404s.
     (async () => {
       try {
         const c = await getCatalog(12);
@@ -80,6 +84,17 @@ export default function ShopPage() {
               ? { popularityRank: it.rank }
               : {}),
             ...(typeof it.views === "number" ? { views: it.views } : {}),
+            ...(typeof it.carts === "number" ? { carts: it.carts } : {}),
+            ...(typeof it.orders === "number" ? { orders: it.orders } : {}),
+            ...(typeof it.conv_rate === "number"
+              ? { conv_rate: it.conv_rate }
+              : {}),
+            ...(typeof it.category_id === "number"
+              ? { category_id: it.category_id }
+              : {}),
+            ...(typeof it.category_size === "number"
+              ? { category_size: it.category_size }
+              : {}),
           }))
         );
         setCatalogLive(true);
@@ -97,6 +112,7 @@ export default function ShopPage() {
         const out = await postEvent(sid, itemId, type, 10);
         setRecos(out.items);
         setRecent(out.recent_items);
+        setLastEvent(type);
         setMeta({ version: out.model_version, ms: out.latency_ms, req: out.request_id });
         setError("");
       } catch {
@@ -199,7 +215,7 @@ export default function ShopPage() {
             {recent.slice(-12).map((id, i) => (
               <span
                 key={`${id}-${i}`}
-                className="rounded-full bg-primary-100 px-2.5 py-1 text-xs font-semibold text-primary-700"
+                className="rounded-full bg-primary-100 px-2.5 py-1 font-mono text-xs font-semibold text-primary-700"
               >
                 {id}
               </span>
@@ -207,6 +223,12 @@ export default function ShopPage() {
           </div>
         </section>
       )}
+      <AuditPanel
+        sid={sid}
+        trace={meta}
+        lastEvent={lastEvent}
+        recentCount={recent.length}
+      />
       <TabBar />
     </div>
   );

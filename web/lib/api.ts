@@ -2,7 +2,16 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
-export type RecoItem = { item_id: string; score: number };
+export type RecoItem = {
+  item_id: string;
+  score: number;
+  views?: number;
+  carts?: number;
+  orders?: number;
+  conv_rate?: number;
+  category_id?: number;
+  category_size?: number;
+};
 
 export type EventOut = {
   request_id: string;
@@ -75,7 +84,16 @@ export async function getP95(): Promise<{ p95_ms: number; samples: number }> {
   }
 }
 
-export type CatalogItem = { item_id: string; rank?: number; views?: number };
+export type CatalogItem = {
+  item_id: string;
+  rank?: number;
+  views?: number;
+  carts?: number;
+  orders?: number;
+  conv_rate?: number;
+  category_id?: number;
+  category_size?: number;
+};
 export type CatalogOut = { items: CatalogItem[] };
 
 /** Thrown when GET /v1/catalog is unavailable (e.g. endpoint not yet added). */
@@ -87,7 +105,7 @@ export class CatalogUnavailableError extends Error {
 }
 
 /**
- * Live catalog from the API: GET /v1/catalog?n=12 → {"items":[{"item_id","rank"}]}.
+ * Live catalog from the API: GET /v1/catalog?n=12 → {"items":[{...stats, category}]}.
  * Throws CatalogUnavailableError when the endpoint is missing/failing so the
  * page can fall back to the verified-real ID list.
  */
@@ -102,17 +120,67 @@ export async function getCatalog(n = 12): Promise<CatalogOut> {
   }
   if (!r.ok) throw new CatalogUnavailableError(`catalog ${r.status}`);
   const raw = (await r.json()) as {
-    items?: Array<{ item_id?: string | number; rank?: number; views?: number }>;
+    items?: Array<{
+      item_id?: string | number;
+      rank?: number;
+      views?: number;
+      carts?: number;
+      orders?: number;
+      conv_rate?: number;
+      category_id?: number;
+      category_size?: number;
+    }>;
   };
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" ? v : undefined;
   const items: CatalogItem[] = Array.isArray(raw.items)
     ? raw.items
         .filter((it) => it && it.item_id !== undefined && it.item_id !== null)
-        .map((it) => ({
-          item_id: String(it.item_id),
-          ...(typeof it.rank === "number" ? { rank: it.rank } : {}),
-          ...(typeof it.views === "number" ? { views: it.views } : {}),
-        }))
+        .map((it) => {
+          const out: CatalogItem = { item_id: String(it.item_id) };
+          const rank = num(it.rank);
+          const views = num(it.views);
+          const carts = num(it.carts);
+          const orders = num(it.orders);
+          const conv = num(it.conv_rate);
+          const cat = num(it.category_id);
+          const catSize = num(it.category_size);
+          if (rank !== undefined) out.rank = rank;
+          if (views !== undefined) out.views = views;
+          if (carts !== undefined) out.carts = carts;
+          if (orders !== undefined) out.orders = orders;
+          if (conv !== undefined) out.conv_rate = conv;
+          if (cat !== undefined) out.category_id = cat;
+          if (catSize !== undefined) out.category_size = catSize;
+          return out;
+        })
     : [];
   if (items.length === 0) throw new CatalogUnavailableError("catalog empty");
   return { items };
+}
+
+export type CompareSide = {
+  item_id: string;
+  known: boolean;
+  views?: number;
+  carts?: number;
+  orders?: number;
+  conv_rate?: number;
+  category_id?: number;
+  category_size?: number;
+};
+
+/**
+ * Manual A-vs-B check: GET /v1/compare?a=..&b=.. → real stats side by side.
+ * For humans verifying why A ranks above B. Never invented.
+ */
+export async function compareItems(
+  a: string,
+  b: string
+): Promise<{ a: CompareSide; b: CompareSide }> {
+  const r = await fetch(
+    `${API_BASE}/v1/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+  );
+  if (!r.ok) throw new Error(`compare ${r.status}`);
+  return (await r.json()) as { a: CompareSide; b: CompareSide };
 }
