@@ -1,7 +1,7 @@
 # tests/models/test_candidates.py
 # Given inventory >100k items (simulated with 1200) + session S123
 # When candidate generation runs / Then <=500 candidates pass to the ranker
-from src.models.baseline import item_similarity_rank, popularity_rank
+from src.models.baseline import popularity_rank
 from src.models.candidates import generate_candidates
 
 

@@ -13,7 +13,8 @@ from src.streaming.session_processor import SessionProcessor
 
 
 class MemRedis:
-    def __init__(self): self.store = {}
+    def __init__(self):
+        self.store = {}
     def pipeline(self): return self
     def __enter__(self): return self
     def __exit__(self, *a): return False
@@ -29,7 +30,8 @@ def _ingest(proc):
                            "event_type": "click", "city": "Bali"})
     o = normalize_otto({"session_id": "s1", "order_id": "a1", "item_id": "a1",
                         "timestamp": 1757760000, "event_type": "order"})
-    proc.apply_event(t.__dict__); proc.apply_event(o.__dict__)
+    proc.apply_event(t.__dict__)
+    proc.apply_event(o.__dict__)
     assert t.session_id == "trivago:S1" and o.session_id == "otto:s1"
 
 

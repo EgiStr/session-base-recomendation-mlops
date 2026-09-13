@@ -61,7 +61,9 @@ def create_app(session_store: Optional[Dict[str, Any]] = None,
         rid = getattr(request.state, "request_id", uuid.uuid4().hex[:12])
         key = f"{req.track}:{req.session_id}"
         sess = store.get(key)
-        elapsed_ms = lambda: (time.perf_counter() - t0) * 1000.0
+
+        def elapsed_ms() -> float:
+            return (time.perf_counter() - t0) * 1000.0
 
         def done(items, version, reason=None):
             ms = elapsed_ms()

@@ -8,7 +8,8 @@ from src.monitoring.metrics import Metrics
 def test_request_counting():
     # Given 3 requests / When recorded / Then counter == 3
     m = Metrics(CollectorRegistry())
-    for _ in range(3): m.observe_request("ranker-v3", 0.02, ok=True)
+    for _ in range(3):
+        m.observe_request("ranker-v3", 0.02, ok=True)
     assert generate_latest(m.registry).count(b"triprank_requests_total")
 
 
