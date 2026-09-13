@@ -1,0 +1,12 @@
+{
+  "title": "TripRank — Model Operations",
+  "tags": ["triprank", "mlops"],
+  "panels": [
+    {"title": "Requests / sec", "targets": [{"expr": "rate(triprank_requests_total[1m])"}]},
+    {"title": "P95 latency", "targets": [{"expr": "histogram_quantile(0.95, rate(triprank_latency_seconds_bucket[5m]))"}]},
+    {"title": "P99 latency", "targets": [{"expr": "histogram_quantile(0.99, rate(triprank_latency_seconds_bucket[5m]))"}]},
+    {"title": "Error rate", "targets": [{"expr": "rate(triprank_errors_total[5m])"}]},
+    {"title": "Latency by model_version", "targets": [{"expr": "histogram_quantile(0.95, sum by (model_version, le) (rate(triprank_latency_seconds_bucket[5m])))"}]},
+    {"title": "Champion vs Challenger traffic", "targets": [{"expr": "sum by (model_version) (rate(triprank_requests_total[5m]))"}]}
+  ]
+}
