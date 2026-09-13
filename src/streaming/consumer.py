@@ -36,6 +36,10 @@ def consume_loop(consumer: Any, processor: Any,
 def _build_consumer() -> Any:
     from kafka import KafkaConsumer
 
+    # In-compose: kafka:29092 (INTERNAL listener). Host-side dev:
+    # localhost:9092 (EXTERNAL listener). The broker advertises a reachable
+    # address per listener — kafka-python follows metadata, so the bootstrap
+    # host must match the side you run on.
     servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
     consumer = KafkaConsumer(
         TOPIC,

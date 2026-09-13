@@ -8,7 +8,7 @@ services:
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       REDIS_URL: redis://redis:6379/0
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       DATABASE_URL: postgresql://triprank:triprank@postgres:5432/triprank
     depends_on:
       - redis
@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.streaming
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379/0
     depends_on:
       - kafka
@@ -46,10 +46,15 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      # Dual listeners: INTERNAL for compose-network clients, EXTERNAL for
+      # host-side clients (local uvicorn / dev scripts). Each side is
+      # advertised an address it can actually reach — a single advertised
+      # hostname breaks one side or the other (kafka-python follows metadata).
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -99,9 +104,11 @@ services:
     ports:
       - "3001:3001"
     environment:
-      NEXT_PUBLIC_API_BASE: http://api:8000
-    depends_on:
-      - api
+      # Local-dev mode: browser-side fetches hit host uvicorn directly.
+      # Flip back to http://api:8000 only when API runs as a compose service.
+      NEXT_PUBLIC_API_BASE: http://localhost:8000
+    # NOTE (local-dev): no depends_on api — the API runs on host uvicorn.
+    # Restore `depends_on: [api]` when the API is deployed as a compose service.
 
 volumes:
   mlflow-data:
