@@ -26,14 +26,18 @@ def consume_loop(consumer: Any, processor: Any,
                 break
             break
         msgs = batch.values() if isinstance(batch, dict) else batch
+        # kafka-python poll() → {TopicPartition: [records]}: flatten one level.
+        flat = []
         for m in msgs:
+            flat.extend(m) if isinstance(m, list) else flat.append(m)
+        for m in flat:
             value = m.value if hasattr(m, "value") else m
             if isinstance(value, (bytes, bytearray)):
                 value = decode(bytes(value))
             processor.apply_event(value)
 
 
-def _build_consumer() -> Any:
+def _build_consumer() -> Any:  # pragma: no cover - integration: needs live broker
     from kafka import KafkaConsumer
 
     # In-compose: kafka:29092 (INTERNAL listener). Host-side dev:
@@ -53,7 +57,7 @@ def _build_consumer() -> Any:
     return consumer
 
 
-def _build_processor() -> Any:
+def _build_processor() -> Any:  # pragma: no cover - integration: needs live redis
     import redis as _redis
 
     from src.streaming.session_processor import SessionProcessor
@@ -64,7 +68,7 @@ def _build_processor() -> Any:
     return SessionProcessor(redis_client=client)
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover - integration: infinite loop on live broker
     logging.basicConfig(level=logging.INFO)
     consumer = _build_consumer()
     processor = _build_processor()

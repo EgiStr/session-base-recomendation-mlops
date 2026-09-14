@@ -72,7 +72,7 @@ def rank_queries(X, y, groups, meta, scorer, k=10):
     return ranked, relevant
 
 
-def main() -> dict:
+def main() -> dict:  # pragma: no cover - integration: needs dataset CSV + MLflow server
     ap = argparse.ArgumentParser()
     ap.add_argument("--sessions", type=int, default=200000)
     ap.add_argument("--holdout-days", type=int, default=7)
