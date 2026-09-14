@@ -1,8 +1,9 @@
 # TripRank Architecture Elaborated
 
-> Diagrams + flows + use cases, derived from the shipped code at `fefda95`.
+> Diagrams + flows + use cases, derived from the shipped code at `7443be2`.
 > Companion to `docs/architecture.md` (service catalog), `docs/api-reference.md`
-> (endpoint contracts), `docs/mlops.md` (canary/retrain ops).
+> (endpoint contracts), `docs/mlops.md` (canary/retrain ops), `docs/web-frontend.md`
+> (pages/components). §8 covers the web application in the same detail.
 > Diagram notation: Mermaid. Render at https://mermaid.live or any
 > Mermaid-enabled viewer. Every actor, message, and branch below traces to a
 > file + line range cited inline — no invented steps.
@@ -252,3 +253,158 @@ UNVERIFIED: end-to-end canary with live split traffic (ladder logic is
 implemented + tested; the API serves a single ranker — verify by wiring the
 split before claiming canary deploys). UNVERIFIED: automated retrain cadence
 (no scheduler wired — run manually or add cron/CI).
+
+## 8. Application elaboration (web + serving + data in one view)
+
+### 8.1 Web application — pages, components, API calls
+
+Three routes, one shared `TabBar`, one shared `web/lib/api.ts` client
+(`API_BASE` from `NEXT_PUBLIC_API_BASE`, baked at build):
+
+```mermaid
+flowchart TB
+    subgraph web [Web :3001 — web/]
+        TB[TabBar: Belanja / MLOps / Data]
+        SHOP["/ page.tsx — Workbench<br/>header session card · reco grid<br/>catalog grid · session trail · AuditPanel"]
+        MLOPS["/mlops page.tsx — Stat-Led ledger<br/>API/Ready/P95/samples · holdout bars<br/>quality-gate PASS card · canary+drift explainer"]
+        DATA["/data page.tsx — Long Document<br/>pipeline narrative · event distribution<br/>repro commands"]
+        PC[ProductCard: ID fingerprint thumb<br/>#rank badge · views cart/order conv%<br/>category chip · +Keranjang / Beli]
+        AP[AuditPanel: session trace<br/>model · latency · request · last event<br/>A-vs-B compare inputs]
+        CLI[lib/api.ts: postEvent · getSession<br/>getCatalog · compareItems · getHealth · getP95]
+    end
+    subgraph api [API :8000]
+        EV[POST /v1/events]
+        SES[GET /v1/session]
+        CAT[GET /v1/catalog]
+        CMP[GET /v1/compare]
+        MON[GET /v1/monitor]
+        OPS[GET /health /ready /metrics /metrics/json]
+    end
+
+    TB --- SHOP & MLOPS & DATA
+    SHOP --> PC & AP
+    PC -->|fire click/cart/order| CLI
+    AP -->|compareItems| CLI
+    SHOP -->|refresh on load| CLI
+    MLOPS -->|getHealth getP95| CLI
+    CLI -->|postEvent| EV
+    CLI -->|getSession| SES
+    CLI -->|getCatalog + CatalogUnavailableError → VERIFIED_REAL| CAT
+    CLI -->|compareItems| CMP
+```
+
+Grounded details:
+
+- Shop state machine (`web/app/page.tsx:47-130`): `sid` (localStorage
+  `triprank:sid`, `shop-xxxxxx` when absent) → `refresh(id)` = `getSession`
+  → reco/trail/meta; `fire(itemId, type)` = `postEvent` → replace reco +
+  trail + meta. `pending` disables all card buttons during flight; failures
+  set an inline banner, never a blank page.
+- Catalog source (`page.tsx:77-106`): `getCatalog(12)` maps only numeric
+  fields that are actually numbers; any throw → `VERIFIED_REAL` (real
+  popularity IDs 187946/461686/5411/370653/219512 + real-looking tail) with
+  `catalogLive=false` ("populer" badge instead of "live").
+- MLOps numbers (`mlops/page.tsx:11-15`): hard-coded holdout table
+  (NDCG 0.9777/0.7274, Recall 0.9947/0.9656, MRR 0.9727/0.6429 — matches
+  `meta.json` production metrics) + live API/Ready/P95/samples via
+  `getHealth`+`getP95` (`:35-50`).
+- `ProductCard` contract (`ProductCard.tsx:31-51`): hue fingerprint
+  `HUES[h % 5]` over `(h*31 + code) % 997`; `rank = popularityRank ?? rank`;
+  stats/cart-order/conv/score cells render only when numeric; honesty caption
+  "Tanpa nama — dataset hanya menyimpan ID. Angka di atas statistik asli."
+- `AuditPanel` contract (`AuditPanel.tsx:59-172`): trace grid mirrors
+  `EventOut` fields; compare defaults A=`187946` B=`461686`; unknown side →
+  dashed "tak dikenal (di luar katalog latih)" card; compare errors inline.
+
+### 8.2 Serving data flow — Redis, Postgres, ranker in one sequence
+
+Extends §2's event sequence with the storage reads that were elided there
+(`api/main.py:42-120`, `223-278`):
+
+```mermaid
+sequenceDiagram
+    participant W as Web :3001
+    participant A as API create_app
+    participant R as Redis {track}:{sid}
+    participant B as RetailRocketRanker
+    participant P as Postgres
+
+    W->>A: POST /v1/events (session,item,type,k)
+    A->>R: HGETALL key → recent_items last_ts last_event seen
+    alt cold (key missing)
+        A->>B: popularity(k) — true popularity order, not inventory order
+        A->>P: enrich_items (lazy-load item_stats + item_category once)
+        A-->>W: baseline-popularity · score 0.5 · 200
+    else warm
+        A->>R: HSET recent[-50:] last_ts last_event seen[-500:] + EXPIRE 1800
+        A->>B: recommend(session, funnel≤500, k, recent)
+        Note over B: _features: recency/repeat from prefix;<br/>pop/conv proxy from popularity.csv rank;<br/>booster.predict → sort -score,item_id
+        A->>P: enrich_items: views/carts/orders/conv_rate + category chips
+        A-->>W: ranker-retailrocket-v1 · rank scores · 200
+    end
+    A-)P: sink_app_event → events_app (post-response, best-effort)
+```
+
+Funnel rule (`api/main.py:395-409` + `436-442`): `inv[:k]` when no history,
+else full inventory trimmed to `recent ∩ inv + head`, cap 500. Persistence
+bounds: `recent[-50:]`, `sorted(seen)[-500:]` (`:251-263`), TTL 1800s.
+`enrich_items` is additive-only — unknown ids keep score, uncategorized items
+carry no chip (`:97-120`).
+
+### 8.3 Training data flow — CSV → Postgres → frame → artifacts
+
+```mermaid
+flowchart LR
+    HF[HuggingFace dataset<br/>fetch_retailrocket.py] --> CSV[events.csv 2.76M]
+    CSV -->|COPY 200k chunks| RAW[(events_raw UNLOGGED<br/>visitorid,itemid,event,ts)]
+    RAW -->|02_aggregates| SES[(sessions 1.4M<br/>sess_len,last_ts,recent20)]
+    RAW -->|02_aggregates| STAT[(item_stats 235k<br/>views,carts,orders,pop,conv)]
+    PROPS[item_properties parts<br/>categoryid rows] --> CAT[(item_category 417k/1180<br/>categoryid + sibling size)]
+    RAW -->|split_time_holdout 7d| FRAME[build_training_frame<br/>prefix/positives/negatives<br/>6 feats · labels 0/2 · groups]
+    FRAME -->|LGBMRanker 100×31 lambdarank@10| BOOST[model.pkl + meta.json]
+    STAT -->|top-50k| POP[popularity.csv]
+    RAW -->|sorted unique| INV[inventory.csv 230k]
+    POP & BOOST & INV --> IMG[baked into api image<br/>RetailRocketRanker loads at import]
+```
+
+Grounded: `events_raw` starts UNLOGGED, `SET LOGGED` after aggregates
+(`02_aggregates.sql:33`); `sessions.recent_items` cap 20 DESC
+(`:7-13`); `item_conv_rate = (carts+orders)/views`
+(`:27-31`); category is latest-timestamp-wins, standalone table so reloads
+don't wipe it (`04_item_category.sql:1-7`); `inv` sorted ascending
+(`train_real.py:133`) — hence the cold-start fix serving `popularity()`
+instead of inventory order.
+
+### 8.4 MLOps closed loop — traffic back to training
+
+```mermaid
+flowchart TB
+    SHOPPER[Shopper taps] --> EV[POST /v1/events]
+    EV --> RECO[re-ranked top-k]
+    EV -.->|post-response best-effort| APP[(events_app<br/>event_id,session,item,event,track,version)]
+    APP -->|retrain_from_app.py --min-app-events 100| MERGE[base CSV + app rows<br/>click→view cart→addtocart order→transaction<br/>visitorid 9e9+idx%50k]
+    MERGE -->|same frame + hyperparams + gate| V2[artifacts v2<br/>Champion untouched]
+    MON[/v1/monitor<br/>cart/order rates + top100_overlap/] -->|rates/overlap falling| DECIDE{drift PSI>0.25<br/>or NDCG drop>5%<br/>24h debounce}
+    DECIDE -->|RETRAIN RECOMMENDED| MERGE
+    GRAF[Grafana 4 panels<br/>rps · p95 · errors · p95 by version] -->|operator watches| MON
+```
+
+What's manual vs automatic today: event capture, monitoring, drift math, and
+the retrain script are all implemented; the **trigger is human** — an
+operator reads Grafana/`/v1/monitor` and runs `retrain_from_app.py`, then
+promotes via the `Champion` alias. UNVERIFIED: any scheduler or auto-promote
+wire-up — no cron/CI job exists; verify in the repo before claiming
+automation.
+
+### 8.5 Failure-mode matrix (application view)
+
+| Failure | User sees | System does | Verify |
+|---|---|---|---|
+| Unknown session (cold) | popularity grid, no error | `baseline-popularity`, score 0.5, enriched | `api/main.py:386-391,479-481` |
+| Ranker throws / missing | same grid shape, `fallback` version | `score_candidates` catch-all, never 5xx | `inference.py:24-28` |
+| Postgres down | cards without stats/chips, monitor degraded | lazy caches stay `{}`, sink skipped, `reason` set | `api/main.py:63-64,92-93,542-545` |
+| Redis down | app still responds (in-process store) | `_resolve_store` dict fallback, `/ready` 503 | `api/main.py:289-306,552-556` |
+| Catalog endpoint fails | `VERIFIED_REAL` grid, "populer" badge | `CatalogUnavailableError` → fallback list | `api.ts:112-121`, `page.tsx:101-104` |
+| Compare unknown id | dashed "tak dikenal" card | `{"known": false}` per side | `api/main.py:584-599`, `AuditPanel.tsx:18-27` |
+| Malformed Kafka msg (no `timestamp`) | nothing (async path) | consumer `KeyError` — known gap, own producer so low risk | `architecture.md` §6 |
+| MLflow down at train | train aborts before registry | `SystemExit` on gate FAIL; outage queue `/tmp/triprank-queue` | `train_real.py:122-123`, `registry.py:31-39` |
